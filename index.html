@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Marginalia — Notes, Summaries & Quizzes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,wght@0,500;0,600;0,700;1,500&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+
+<!-- Firebase (storage) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+
+<!-- File parsing -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mammoth@1.7.0/mammoth.browser.min.js"></script>
+
+<!-- Word doc export -->
+<script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.js"></script>
+
+<!-- Markdown rendering for summaries -->
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+</head>
+<body>
+
+<!-- ===== Passcode gate ===== -->
+<div id="gate" class="gate">
+  <div class="gate-card">
+    <p class="gate-eyebrow">Marginalia</p>
+    <h1 class="gate-title">Your notebook,<br>locked to you.</h1>
+    <input id="gate-input" type="password" placeholder="Enter passcode" autocomplete="off">
+    <button id="gate-submit" class="btn btn-primary">Open notebook</button>
+    <p id="gate-error" class="gate-error"></p>
+  </div>
+</div>
+
+<!-- ===== App shell ===== -->
+<div id="app" class="app hidden">
+
+  <!-- Notebook spine / sidebar -->
+  <aside class="spine">
+    <div class="spine-head">
+      <p class="spine-eyebrow">Marginalia</p>
+      <button id="new-note-btn" class="btn btn-tab" title="New note">+ New note</button>
+    </div>
+    <div id="note-list" class="note-list"><!-- tabs injected here --></div>
+    <button id="settings-btn" class="spine-settings" title="Settings">⚙ Settings</button>
+  </aside>
+
+  <!-- Main page -->
+  <main class="page">
+
+    <!-- Empty state -->
+    <div id="empty-state" class="empty-state">
+      <p class="empty-kicker">Blank page</p>
+      <h2>Paste a lecture, upload a file, and let's turn it into something you'll actually remember.</h2>
+      <button id="empty-new-btn" class="btn btn-primary">Start a new note</button>
+    </div>
+
+    <!-- Note workspace -->
+    <div id="workspace" class="workspace hidden">
+
+      <header class="page-header">
+        <input id="note-title" class="note-title-input" placeholder="Untitled lecture" spellcheck="false">
+        <div class="page-tabs">
+          <button class="page-tab active" data-tab="source">Source</button>
+          <button class="page-tab" data-tab="summary">Summary</button>
+          <button class="page-tab" data-tab="quiz">Quiz</button>
+        </div>
+      </header>
+
+      <!-- SOURCE TAB -->
+      <section id="tab-source" class="tab-pane active">
+        <div class="dropzone" id="dropzone">
+          <p><strong>Drop a PDF, Word doc, or .txt file here</strong>, or paste your raw notes below.</p>
+          <input type="file" id="file-input" accept=".pdf,.docx,.txt" hidden>
+          <button id="browse-btn" class="btn btn-ghost">Browse files</button>
+        </div>
+        <textarea id="source-text" placeholder="Paste your lecture notes here..."></textarea>
+        <div class="action-row">
+          <button id="save-note-btn" class="btn btn-secondary">Save note</button>
+          <button id="summarize-btn" class="btn btn-primary">Generate detailed summary →</button>
+        </div>
+      </section>
+
+      <!-- SUMMARY TAB -->
+      <section id="tab-summary" class="tab-pane">
+        <div id="summary-empty" class="pane-empty">
+          <p>No summary yet. Go to <strong>Source</strong> and generate one — it'll be a detailed, structured breakdown of the important material, not just a few bullet points.</p>
+        </div>
+        <div id="summary-loading" class="pane-loading hidden">
+          <div class="spinner"></div>
+          <p id="summary-loading-text">Reading through your notes…</p>
+        </div>
+        <div id="summary-content" class="summary-content hidden"></div>
+        <div id="summary-actions" class="action-row hidden">
+          <button id="regen-summary-btn" class="btn btn-ghost">Regenerate</button>
+          <button id="download-doc-btn" class="btn btn-secondary">⬇ Download as Word doc</button>
+          <button id="make-quiz-btn" class="btn btn-primary">Generate quiz (20–30 Qs) →</button>
+        </div>
+      </section>
+
+      <!-- QUIZ TAB -->
+      <section id="tab-quiz" class="tab-pane">
+        <div id="quiz-empty" class="pane-empty">
+          <p>No quiz yet. Generate a summary first, then create a quiz from it.</p>
+        </div>
+        <div id="quiz-loading" class="pane-loading hidden">
+          <div class="spinner"></div>
+          <p>Writing questions from your notes…</p>
+        </div>
+        <div id="quiz-setup" class="quiz-setup hidden">
+          <label for="quiz-count">Number of questions</label>
+          <input type="range" id="quiz-count" min="20" max="30" value="25">
+          <span id="quiz-count-val">25</span>
+          <button id="start-quiz-gen-btn" class="btn btn-primary">Generate</button>
+        </div>
+        <div id="quiz-content" class="quiz-content hidden"></div>
+        <div id="quiz-result" class="quiz-result hidden"></div>
+      </section>
+
+    </div>
+  </main>
+</div>
+
+<!-- ===== Settings modal ===== -->
+<div id="settings-modal" class="modal hidden">
+  <div class="modal-card">
+    <h2>Settings</h2>
+    <p class="modal-sub">These connect Marginalia to your own storage and AI. Stored only in this browser's local storage.</p>
+
+    <label>Site passcode <span class="hint">(anyone with this can open your notebook)</span></label>
+    <input id="cfg-passcode" type="text" placeholder="choose a passcode">
+
+    <hr>
+    <label>Firebase config <span class="hint">(paste the whole config object)</span></label>
+    <textarea id="cfg-firebase" placeholder='{"apiKey":"...", "authDomain":"...", "projectId":"...", ...}'></textarea>
+
+    <hr>
+    <label>API base URL <span class="hint">(your deployed serverless function, e.g. https://yourdomain.com)</span></label>
+    <input id="cfg-apibase" type="text" placeholder="https://yourdomain.com">
+
+    <div class="action-row">
+      <button id="settings-close-btn" class="btn btn-ghost">Cancel</button>
+      <button id="settings-save-btn" class="btn btn-primary">Save settings</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
